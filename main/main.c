@@ -10,7 +10,6 @@
 void app_main(void)
 {
     esp_err_t ret;
-    uint8_t x = 0;
 
     ret = nvs_flash_init();     /* 初始化NVS */
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -18,5 +17,10 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
-    wifi_sta_init();           /* WIFI初始化 */
+    wifi_init_softap();
+    while (1)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    
 }
