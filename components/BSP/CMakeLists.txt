@@ -1,14 +1,20 @@
-set(srcs
-            "dynamo/dynamo.c")
+set(src_dirs
+            EXIT
+            WIFI)
 
 set(include_dirs
-            "dynamo")
+            EXIT
+            WIFI)
 
 set(requires
-             "esp_driver_ledc" "esp_driver_pcnt" "esp_timer")
+            esp_wifi
+            esp_netif   
+            esp_event  
+            nvs_flash   
+            driver)
 
-idf_component_register(SRCS "${srcs}"
+idf_component_register(SRC_DIRS "${src_dirs}"
                        INCLUDE_DIRS "${include_dirs}"
-                       REQUIRES "${requires}")
-                    
+                       REQUIRES ${requires})
+
 component_compile_options(-ffast-math -O3 -Wno-error=format=-Wno-format)

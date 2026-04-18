@@ -3,6 +3,8 @@
 cmake_minimum_required(VERSION 3.22)
 
 set(EXTRA_COMPONENT_DIRS components/Middlewares)
+set(EXTRA_COMPONENT_DIRS components/BSP)
 add_compile_options(-fdiagnostics-color=always)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(project_1)
+project(Version_001)
