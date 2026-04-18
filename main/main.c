@@ -6,6 +6,8 @@
 #include "esp_mac.h"
 #include "wifi.h"
 #include <stdio.h>
+#include "http.h"
+#include "udp.h"  
 
 void app_main(void)
 {
@@ -18,6 +20,8 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
     wifi_init_softap();
+    start_webserver();
+    start_udp_server();
     while (1)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));

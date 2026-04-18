@@ -7,6 +7,7 @@
 #include <netdb.h>
 #include <stdio.h>
 #include "esp_log.h"
+#include "esp_http_server.h"
 
 static const char *TAG = "AP";
 #define EXAMPLE_ESP_WIFI_SSID   "ESP32S3 WIFI"

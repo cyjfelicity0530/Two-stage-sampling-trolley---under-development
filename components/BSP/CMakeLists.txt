@@ -1,10 +1,14 @@
 set(src_dirs
             EXIT
-            WIFI)
+            WIFI
+            HTTP
+            UDP)
 
 set(include_dirs
             EXIT
-            WIFI)
+            WIFI
+            HTTP
+            UDP)
 
 set(requires
             esp_wifi
@@ -12,7 +16,9 @@ set(requires
             esp_event  
             nvs_flash   
             driver
-            log)
+            log
+            esp_http_server
+            lwip)
 
 idf_component_register(SRC_DIRS "${src_dirs}"
                        INCLUDE_DIRS "${include_dirs}"
