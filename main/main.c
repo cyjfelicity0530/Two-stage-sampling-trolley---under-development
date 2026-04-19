@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include "http.h"
 #include "udp.h"  
+#include "oled.h"
 
 void app_main(void)
 {
@@ -19,12 +20,16 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    oled_init();
     wifi_init_softap();
     start_webserver();
     start_udp_server();
+    start_monitor_task();
     while (1)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     
 }
+

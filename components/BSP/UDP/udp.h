@@ -2,5 +2,6 @@
 #define __UDP_H__
 
 void start_udp_server(void);
+void start_monitor_task(void);
 
 #endif /* __UDP_H__ */
