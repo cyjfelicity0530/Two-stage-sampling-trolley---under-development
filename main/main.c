@@ -9,6 +9,8 @@
 #include "http.h"
 #include "udp.h"  
 #include "oled.h"
+#include "servo.h"
+#define SERVO_GPIO_PIN  4
 
 void app_main(void)
 {
@@ -26,8 +28,22 @@ void app_main(void)
     start_webserver();
     start_udp_server();
     start_monitor_task();
+    servo_init(SERVO_GPIO_PIN, LEDC_CHANNEL_0);
     while (1)
     {
+      
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        servo_set_angle(LEDC_CHANNEL_0, 0.0f);
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 延时1秒，等待舵机机械转动到位
+
+        servo_set_angle(LEDC_CHANNEL_0, 90.0f);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        servo_set_angle(LEDC_CHANNEL_0, 180.0f);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        servo_set_angle(LEDC_CHANNEL_0, 90.0f);
+       
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     
