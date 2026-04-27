@@ -1,0 +1,1 @@
+#ifndef _CHASSIS_CONTROL_H_\n#define _CHASSIS_CONTROL_H_\n\n#include "esp_err.h"\n#include <stdbool.h>\n\nesp_err_t chassis_control_init(void);\nvoid chassis_set_auto_cmd(float linear_cmd, float angular_cmd);\nvoid chassis_emergency_stop(bool stop);\n\n#endif\n
