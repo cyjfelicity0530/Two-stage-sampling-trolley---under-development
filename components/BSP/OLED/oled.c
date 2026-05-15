@@ -1,5 +1,4 @@
 #include "oled.h"
-// ESP-IDF v6.0 新版 I2C 头文件
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -30,7 +29,7 @@ static esp_err_t oled_write_bytes(uint8_t *data, size_t len) {
 }
 
 static void oled_send_cmd(uint8_t cmd) {
-    uint8_t buf[2] = {0x00, cmd}; // 0x00 表示后面跟着的是命令
+    uint8_t buf[2] = {0x00, cmd}; 
     oled_write_bytes(buf, 2);
 }
 
@@ -108,7 +107,7 @@ void oled_draw_pixel(uint8_t x, uint8_t y) {
 }
 
 // ==================== 8x8 ASCII 字库 ====================
-// 【正确】6x8点阵：95个ASCII字符，每个字符8行，每行1字节(低6位有效)
+// 6x8点阵：95个ASCII字符，每个字符8行，每行1字节(低6位有效)
 static const uint8_t font6x8[95][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 空格
     {0x00,0x00,0x00,0x2F,0x00,0x00,0x00,0x00}, // !

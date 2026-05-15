@@ -5,7 +5,8 @@
                 UDP
                 OLED
                 SERVO
-                GAMEPAD)
+                GAMEPAD
+                DYNAMO)
 
     set(include_dirs
                 EXIT
@@ -14,7 +15,8 @@
                 UDP
                 OLED
                 SERVO
-                GAMEPAD)
+                GAMEPAD
+                DYNAMO)
 
     set(requires
                 driver
@@ -29,7 +31,8 @@
                 esp_driver_gpio
                 esp_hw_support
                 esp_driver_mcpwm
-                esp_driver_ledc)
+                esp_driver_ledc
+                esp_driver_pcnt)
 
     idf_component_register(SRC_DIRS "${src_dirs}"
                         INCLUDE_DIRS "${include_dirs}"

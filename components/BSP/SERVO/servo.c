@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include "driver/ledc.h"
 #include "hal/ledc_types.h"
-#include "system_state.h" // 引入全局状态结构体定义
+#include "system_state.h" 
 
 
 static const char *TAG = "SERVO";
@@ -15,7 +15,7 @@ static const char *TAG = "SERVO";
 #define SERVO_LEDC_DUTY_RES     LEDC_TIMER_13_BIT   // 13位分辨率 (值范围: 0 ~ 8191)
 #define SERVO_LEDC_FREQ_HZ      50                  // PWM频率: 50Hz (周期20ms)
 
-// --- 舵机脉宽参数 (大多数标准180度舵机参数，可根据实际微调) ---
+// --- 舵机脉宽参数
 #define SERVO_MIN_PULSEWIDTH_US 500                 // 0度对应的脉宽: 0.5ms
 #define SERVO_MAX_PULSEWIDTH_US 2500                // 180度对应的脉宽: 2.5ms
 #define SERVO_MAX_DEGREE        180.0f              // 最大角度
@@ -56,7 +56,7 @@ esp_err_t servo_init(int gpio_num, ledc_channel_t channel)
         .timer_sel      = SERVO_LEDC_TIMER,
         .intr_type      = LEDC_INTR_DISABLE,
         .gpio_num       = gpio_num,
-        .duty           = calculate_duty(SERVO_MIN_PULSEWIDTH_US), // 上电默认设置在0度位置
+        .duty           = calculate_duty(SERVO_MIN_PULSEWIDTH_US), 
         .hpoint         = 0
     };
     err = ledc_channel_config(&ledc_channel);
@@ -71,7 +71,7 @@ esp_err_t servo_init(int gpio_num, ledc_channel_t channel)
 
 esp_err_t servo_set_angle(ledc_channel_t channel, float angle)
 {
-    // 限制角度在 0 到 180 度之间
+    // 限制角度在 0 到最大角度之间
     if (angle < 0.0f) angle = 0.0f;
     if (angle > SERVO_MAX_DEGREE) angle = SERVO_MAX_DEGREE;
 

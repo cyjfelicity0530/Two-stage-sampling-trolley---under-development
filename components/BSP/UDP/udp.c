@@ -3,8 +3,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
-
-// 引入业务层头文件
 #include "udp.h"
 #include "gamepad.h"
 #include "system_state.h"
@@ -12,9 +10,8 @@
 
 #define PORT 3333
 
-// ========================================================
-// 任务 1：纯粹的 UDP 收发任务 (极其干净)
-// ========================================================
+//  UDP 收发
+
 void udp_server_task(void *pvParameters)
 {
     char rx_buffer[128];

@@ -3,15 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
-// 【真正定义】全局变量的地方，只有这里需要赋初值
+//全局变量，各种数据变量参数
 SystemState_t g_state = {0}; 
 
-// 内部使用的边缘检测变量
 static int last_btn_b = 0; 
 
-// ========================================================
 // 解析 UDP 收到的字符串，更新系统状态，并执行硬件控制
-// ========================================================
 void parse_gamepad_data(const char* rx_str)
 {
     int dx = 0, dy = 0, a = 0, b = 0;
@@ -20,7 +17,6 @@ void parse_gamepad_data(const char* rx_str)
     int parsed_count = sscanf(rx_str, "DX:%d,DY:%d,A:%d,B:%d", &dx, &dy, &a, &b);
 
     if (parsed_count == 4) {
-        // 2. 更新到全局结构体中
         g_state.d_x = dx;
         g_state.d_y = dy;
         g_state.btn_a = a;
@@ -32,11 +28,12 @@ void parse_gamepad_data(const char* rx_str)
         }
         last_btn_b = g_state.btn_b;
 
-        // 4. 执行逻辑：机械爪与底盘控制
+        // 机械爪
         if (g_state.btn_a == 1) {
             // open_gripper(); 
         }
 
+        
         // 模拟一些传感器数据（实际开发中，这些会在 ADC / I2C 任务里更新）
         //g_state.battery_voltage = 12.4f;
         //g_state.motor_speed = g_state.d_y * 100;

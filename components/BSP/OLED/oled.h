@@ -7,7 +7,7 @@
 // ==================== 【用户配置】 ====================
 #define OLED_I2C_SDA_PIN  16
 #define OLED_I2C_SCL_PIN  17
-#define OLED_RESET_PIN    0   // 无复位引脚填 -1
+#define OLED_RESET_PIN    0   
 #define OLED_I2C_ADDR     0x3c // 0x3C/0x3D
 #define OLED_WIDTH        128
 #define OLED_HEIGHT       64
