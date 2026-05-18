@@ -13,7 +13,7 @@
 #include "servo.h"
 #include "bldc_motor.h"
 
-#define SERVO_GPIO_PIN  4
+#define SERVO_GPIO_PIN  15
 
 static const char *TAG = "MAIN";
 
@@ -34,35 +34,27 @@ void app_main(void)
     start_udp_server();
     start_monitor_task();
     servo_init(SERVO_GPIO_PIN, LEDC_CHANNEL_0);
-    bldc_motor_init();
+    
+    // ==========================================
+    // 修改点 1：使用双电机初始化函数
+    // ==========================================
+    bldc_motors_init();
+    
+    vTaskDelay(pdMS_TO_TICKS(2000)); 
+
+    // ==========================================
+    // 修改点 2：指定电机 ID 发送控制指令
+    // ==========================================
+    ESP_LOGI(TAG, "Starting Dual Motors...");
+    
+    // 让电机 1 跑在 1500 RPM
+    bldc_motor_set_target_rpm(MOTOR_1, 1500.0f); 
+    
+    // 如果电机 2 也接好了线，可以取消下面这行的注释让它一起跑
+    bldc_motor_set_target_rpm(MOTOR_2, 1200.0f); 
+
     while (1)
     {
-      
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // 2. 启动电机并设定目标转速为 1500 RPM (闭环将自动调节 PWM)
-    ESP_LOGI(TAG, "Command: Run at 1500 RPM");
-    bldc_motor_set_target_rpm(1500.0f);
-
-    vTaskDelay(pdMS_TO_TICKS(5000)); // 运行 5 秒
-
-    // 3. 提速到 2500 RPM
-    ESP_LOGI(TAG, "Command: Speed up to 2500 RPM");
-    bldc_motor_set_target_rpm(2500.0f);
-
-    vTaskDelay(pdMS_TO_TICKS(5000)); // 运行 5 秒
-
-    // 4. 停止电机
-    ESP_LOGI(TAG, "Command: Stop Motor");
-    bldc_motor_set_target_rpm(0.0f);
-
-    vTaskDelay(pdMS_TO_TICKS(2000)); // 等待电机完全停稳
-
-    // 5. 切换方向并重新启动 (必须确保完全停稳，上面延时2秒就是为了这个)
-    ESP_LOGI(TAG, "Command: Switch to CCW and Run at 1000 RPM");
-    bldc_motor_set_direction(BLDC_DIR_CCW);
-    bldc_motor_set_target_rpm(1000.0f);
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
-    
 }
-

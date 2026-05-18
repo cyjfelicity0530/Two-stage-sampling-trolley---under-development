@@ -6,194 +6,243 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static const char *TAG = "BLDC_MOTOR";
+static const char *TAG = "BLDC_MOTORS";
 
-// 硬件句柄
-static mcpwm_cmpr_handle_t comparator = NULL;
-static pcnt_unit_handle_t pcnt_unit = NULL;
-
-// 控制变量
-static volatile float target_rpm = 0.0f;
-static volatile bool motor_running = false;
-
-// MCPWM 周期滴答数 (1MHz 时钟下，40 tick = 25kHz)
+// MCPWM 周期滴答数
 #define MCPWM_PERIOD_TICKS (1000000 / BLDC_PWM_FREQ_HZ)
 
-// ================= PID 闭环任务 =================
+// 电机上下文结构体 (面向对象思想)
+typedef struct {
+    bldc_motor_id_t id;
+    int pin_fg;
+    int pin_dir;
+    int pin_pwm;
+    int pin_brake;
+    int mcpwm_group_id; // S3有2个组(0和1)，我们各分配一个防冲突
+
+    // 硬件句柄
+    mcpwm_cmpr_handle_t comparator;
+    pcnt_unit_handle_t pcnt_unit;
+
+    // 运行状态
+    volatile float target_rpm;
+    volatile float current_rpm;
+    volatile bool motor_running;
+
+    // PID 变量
+    float integral;
+    float prev_error;
+} bldc_motor_ctx_t;
+
+// 实例化两个电机
+static bldc_motor_ctx_t motors[MOTOR_MAX] = {
+    {
+        .id = MOTOR_1, .pin_fg = M1_PIN_FG, .pin_dir = M1_PIN_DIR, 
+        .pin_pwm = M1_PIN_PWM, .pin_brake = M1_PIN_BRAKE, .mcpwm_group_id = 0,
+        .target_rpm = 0, .current_rpm = 0, .motor_running = false, .integral = 0, .prev_error = 0
+    },
+    {
+        .id = MOTOR_2, .pin_fg = M2_PIN_FG, .pin_dir = M2_PIN_DIR, 
+        .pin_pwm = M2_PIN_PWM, .pin_brake = M2_PIN_BRAKE, .mcpwm_group_id = 1,
+        .target_rpm = 0, .current_rpm = 0, .motor_running = false, .integral = 0, .prev_error = 0
+    }
+};
+
+// ================= PID 闭环任务 (双电机版) =================
 static void bldc_pid_control_task(void *arg)
 {
-    float Kp = 0.05f, Ki = 0.01f, Kd = 0.005f; // 注意：此参数需根据您的实际电机带载情况整定
-    float integral = 0.0f, prev_error = 0.0f;
-    int pulse_count = 0;
+    // 经测试调优的温柔参数
+    const float Kp = 0.002f, Ki = 0.005f, Kd = 0.000f; 
     const float dt = BLDC_CTRL_PERIOD_MS / 1000.0f; 
-
+    static int print_cnt = 0;
     while (1) {
-        if (!motor_running || target_rpm <= 0.1f) {
-            // 停止状态下：清空积分，输出 100% 占空比 (高电平停止)
-            mcpwm_comparator_set_compare_value(comparator, 0); 
-            integral = 0.0f;
-            prev_error = 0.0f;
-            vTaskDelay(pdMS_TO_TICKS(BLDC_CTRL_PERIOD_MS));
-            continue;
+        // 遍历处理每个电机
+        for (int i = 0; i < MOTOR_MAX; i++) {
+            bldc_motor_ctx_t *m = &motors[i];
+
+            if (!m->motor_running || m->target_rpm <= 0.1f) {
+                mcpwm_comparator_set_compare_value(m->comparator, 0); 
+                m->integral = 0.0f;
+                m->prev_error = 0.0f;
+                m->current_rpm = 0.0f;
+                continue;
+            }
+
+            // 1. 获取脉冲数
+            int pulse_count = 0;
+            pcnt_unit_get_count(m->pcnt_unit, &pulse_count);
+            pcnt_unit_clear_count(m->pcnt_unit);
+
+            // 2. 计算当前真实 RPM
+            m->current_rpm = ((float)pulse_count / dt) * (60.0f / BLDC_PULSES_PER_ROUND);
+
+            // 3. PID 计算 (抗积分饱和)
+            float error = m->target_rpm - m->current_rpm;
+            
+            m->integral += error * dt;
+            if (m->integral > 20000.0f) m->integral = 20000.0f; 
+            if (m->integral < -20000.0f) m->integral = -20000.0f;
+
+            float derivative = (error - m->prev_error) / dt;
+            float output = (Kp * error) + (Ki * m->integral) + (Kd * derivative);
+            m->prev_error = error;
+
+            // ==========================================
+            // 4. 【核心救命修改】：严格限制最大输出动力！
+            // 绝对不允许超过 30%，防止触发电机过流抽搐
+            // ==========================================
+            if (output > 30.0f) output = 30.0f;  // <--- 以前是 100.0f，改小！
+            if (output < 0.0f) output = 0.0f;
+
+            // 动力 100% -> 占空比 0% (全低电平)
+            float duty_cycle_percent = 100.0f - output; 
+            uint32_t compare_val = (uint32_t)((duty_cycle_percent / 100.0f) * MCPWM_PERIOD_TICKS);
+            if(compare_val > MCPWM_PERIOD_TICKS) compare_val = MCPWM_PERIOD_TICKS;
+
+            mcpwm_comparator_set_compare_value(m->comparator, compare_val);
         }
 
-        // 1. 获取过去周期内的脉冲数并清零
-        pcnt_unit_get_count(pcnt_unit, &pulse_count);
-        pcnt_unit_clear_count(pcnt_unit);
+        // 5. 打印状态 (交替打印 M1 和 M2，避免日志刷屏过快)
+        if (print_cnt++ % 10 == 0) {
+            ESP_LOGI(TAG, "M1 | Target: %.0f | RPM: %.1f  ||  M2 | Target: %.0f | RPM: %.1f", 
+                     motors[MOTOR_1].target_rpm, motors[MOTOR_1].current_rpm,
+                     motors[MOTOR_2].target_rpm, motors[MOTOR_2].current_rpm);
+        }
 
-        // 2. 计算当前真实 RPM
-        // RPM = (脉冲数 / 时间) * (60秒 / 每圈脉冲数)
-        float current_rpm = ((float)pulse_count / dt) * (60.0f / BLDC_PULSES_PER_ROUND);
-
-        // 3. PID 计算 (位置式 PID)
-        float error = target_rpm - current_rpm;
-        integral += error * dt;
-        
-        // 积分限幅 (防止积分饱和)
-        if (integral > 1000.0f) integral = 1000.0f;
-        if (integral < -1000.0f) integral = -1000.0f;
-
-        float derivative = (error - prev_error) / dt;
-        float output = (Kp * error) + (Ki * integral) + (Kd * derivative);
-        prev_error = error;
-
-        // 4. 将 PID 输出映射到 PWM 比较值 (0 ~ MCPWM_PERIOD_TICKS)
-        // 假设 output 代表需要的动力 (0-100%)
-        if (output > 100.0f) output = 100.0f;
-        if (output < 0.0f) output = 0.0f;
-
-        // 【关键电平反转逻辑】：P5 蓝线低电平启动，高电平停止
-        // 动力 100% -> 占空比 0% (全低电平) -> 比较值 = MCPWM_PERIOD_TICKS
-        // 动力 0%   -> 占空比 100% (全高电平) -> 比较值 = 0
-        float duty_cycle_percent = 100.0f - output; 
-        uint32_t compare_val = (uint32_t)((duty_cycle_percent / 100.0f) * MCPWM_PERIOD_TICKS);
-
-        // 安全限制
-        if(compare_val > MCPWM_PERIOD_TICKS) compare_val = MCPWM_PERIOD_TICKS;
-
-        mcpwm_comparator_set_compare_value(comparator, compare_val);
-
+        // 统一延时 (一个周期只需延时一次)
         vTaskDelay(pdMS_TO_TICKS(BLDC_CTRL_PERIOD_MS));
     }
 }
 
-// ================= 硬件初始化 =================
-void bldc_motor_init(void)
+// ================= 单个电机底层初始化封装 =================
+static void init_single_motor_hardware(bldc_motor_ctx_t *m)
 {
-    ESP_LOGI(TAG, "Initializing BLDC Motor (ESP-IDF v6.0 API)...");
-
-    // 1. 初始化普通 GPIO (方向与刹车)
+    // 1. GPIO 初始化
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << BLDC_PIN_DIR) | (1ULL << BLDC_PIN_BRAKE),
+        .pin_bit_mask = (1ULL << m->pin_dir) | (1ULL << m->pin_brake),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf);
-    
-    // 默认设置：正转，刹车拉低(停止)
-    gpio_set_level(BLDC_PIN_DIR, 0); 
-    gpio_set_level(BLDC_PIN_BRAKE, 0); 
+    gpio_set_level(m->pin_dir, 0); 
+    gpio_set_level(m->pin_brake, 0); 
 
-    // 2. 初始化 PCNT (读取 FG 信号)
+    // 2. PCNT 初始化
     pcnt_unit_config_t unit_config = {
         .high_limit = 10000,
         .low_limit = -10000,
     };
-    ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
+    ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &m->pcnt_unit));
 
-    // 添加毛刺滤波器 (防止 PWM 高频噪声干扰 FG 测速)
     pcnt_glitch_filter_config_t filter_config = {
-        .max_glitch_ns = 1000,
+        .max_glitch_ns = 5000, 
     };
-    ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
+    ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(m->pcnt_unit, &filter_config));
 
     pcnt_chan_config_t chan_config = {
-        .edge_gpio_num = BLDC_PIN_FG,
-        .level_gpio_num = -1, // 不使用电平控制方向
+        .edge_gpio_num = m->pin_fg,
+        .level_gpio_num = -1,
     };
     pcnt_channel_handle_t pcnt_chan = NULL;
-    ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_config, &pcnt_chan));
+    ESP_ERROR_CHECK(pcnt_new_channel(m->pcnt_unit, &chan_config, &pcnt_chan));
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD));
 
-    ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
-    ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
-    ESP_ERROR_CHECK(pcnt_unit_start(pcnt_unit));
+    ESP_ERROR_CHECK(pcnt_unit_enable(m->pcnt_unit));
+    ESP_ERROR_CHECK(pcnt_unit_clear_count(m->pcnt_unit));
+    ESP_ERROR_CHECK(pcnt_unit_start(m->pcnt_unit));
 
-    // 3. 初始化 MCPWM (输出 P5 调速)
+    // 3. MCPWM 初始化
     mcpwm_timer_handle_t timer = NULL;
     mcpwm_timer_config_t timer_config = {
-        .group_id = 0,
+        .group_id = m->mcpwm_group_id, // 关键：分离不同的组
         .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
-        .resolution_hz = 1000000, // 1MHz 分辨率
+        .resolution_hz = 1000000,
         .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         .period_ticks = MCPWM_PERIOD_TICKS,
     };
     ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
 
     mcpwm_oper_handle_t oper = NULL;
-    mcpwm_operator_config_t oper_config = { .group_id = 0 };
+    mcpwm_operator_config_t oper_config = { .group_id = m->mcpwm_group_id };
     ESP_ERROR_CHECK(mcpwm_new_operator(&oper_config, &oper));
     ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
 
     mcpwm_comparator_config_t cmpr_config = { .flags.update_cmp_on_tez = true };
-    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &cmpr_config, &comparator));
-    
-    // 初始化时设为 0 (对应 100% 高电平，电机停止)
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, 0));
+    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &cmpr_config, &m->comparator));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(m->comparator, 0)); // 默认停止
 
     mcpwm_gen_handle_t generator = NULL;
-    mcpwm_generator_config_t gen_config = { .gen_gpio_num = BLDC_PIN_PWM };
+    mcpwm_generator_config_t gen_config = { .gen_gpio_num = m->pin_pwm };
     ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_config, &generator));
 
-    // 计数器清零时输出高电平，达到比较值时输出低电平 (配合前面的占空比计算)
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(generator,
         MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
     ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
-        MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_LOW)));
+        MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, m->comparator, MCPWM_GEN_ACTION_LOW)));
 
     ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
     ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
-
-    // 4. 创建 PID 控制任务
-    xTaskCreate(bldc_pid_control_task, "bldc_pid_task", 4096, NULL, 5, NULL);
-    
-    ESP_LOGI(TAG, "BLDC Motor Init OK.");
 }
 
 // ================= 对外控制接口 =================
-void bldc_motor_set_target_rpm(float rpm)
+void bldc_motors_init(void)
 {
-    target_rpm = rpm;
-    if (rpm > 0.0f && !motor_running) {
-        // 启动电机：拉高 BRAKE 引脚
-        gpio_set_level(BLDC_PIN_BRAKE, 1);
-        motor_running = true;
-        ESP_LOGI(TAG, "Motor Started, Target RPM: %.0f", rpm);
-    } else if (rpm <= 0.0f && motor_running) {
-        bldc_motor_estop();
+    ESP_LOGI(TAG, "Initializing Dual BLDC Motors...");
+
+    for (int i = 0; i < MOTOR_MAX; i++) {
+        init_single_motor_hardware(&motors[i]);
+    }
+
+    // 启动统一的 PID 控制任务
+    xTaskCreate(bldc_pid_control_task, "bldc_pid_task", 4096, NULL, 5, NULL);
+    
+    ESP_LOGI(TAG, "Dual Motors Init OK.");
+}
+
+void bldc_motor_set_target_rpm(bldc_motor_id_t motor_id, float rpm)
+{
+    if (motor_id >= MOTOR_MAX) return;
+    bldc_motor_ctx_t *m = &motors[motor_id];
+
+    m->target_rpm = rpm;
+    if (rpm > 0.0f && !m->motor_running) {
+        gpio_set_level(m->pin_brake, 1);
+        m->motor_running = true;
+        ESP_LOGI(TAG, "Motor %d Started, Target RPM: %.0f", motor_id, rpm);
+    } else if (rpm <= 0.0f && m->motor_running) {
+        bldc_motor_estop(motor_id);
     }
 }
 
-void bldc_motor_set_direction(bldc_dir_t dir)
+void bldc_motor_set_direction(bldc_motor_id_t motor_id, bldc_dir_t dir)
 {
-    // 强制安全机制：仅在目标转速为 0 且电机停止时才允许切换方向
-    if (target_rpm > 0.0f || motor_running) {
-        ESP_LOGW(TAG, "Warning: Attempted to switch direction while running! Command ignored.");
+    if (motor_id >= MOTOR_MAX) return;
+    bldc_motor_ctx_t *m = &motors[motor_id];
+
+    if (m->target_rpm > 0.0f || m->motor_running) {
+        ESP_LOGW(TAG, "Motor %d running! Dir switch ignored.", motor_id);
         return;
     }
-    gpio_set_level(BLDC_PIN_DIR, (uint32_t)dir);
-    ESP_LOGI(TAG, "Direction set to %s", dir == BLDC_DIR_CW ? "CW" : "CCW");
+    gpio_set_level(m->pin_dir, (uint32_t)dir);
 }
 
-void bldc_motor_estop(void)
+void bldc_motor_estop(bldc_motor_id_t motor_id)
 {
-    motor_running = false;
-    target_rpm = 0.0f;
-    // 1. 硬件立即断电：拉低 BRAKE
-    gpio_set_level(BLDC_PIN_BRAKE, 0);
-    // 2. PWM 立即输出 100% 高电平
-    mcpwm_comparator_set_compare_value(comparator, 0);
-    ESP_LOGI(TAG, "Motor Emergency Stopped.");
+    if (motor_id >= MOTOR_MAX) return;
+    bldc_motor_ctx_t *m = &motors[motor_id];
+
+    m->motor_running = false;
+    m->target_rpm = 0.0f;
+    gpio_set_level(m->pin_brake, 0);
+    mcpwm_comparator_set_compare_value(m->comparator, 0);
+    ESP_LOGI(TAG, "Motor %d Emergency Stopped.", motor_id);
+}
+
+void bldc_motor_estop_all(void)
+{
+    for (int i = 0; i < MOTOR_MAX; i++) {
+        bldc_motor_estop((bldc_motor_id_t)i);
+    }
 }

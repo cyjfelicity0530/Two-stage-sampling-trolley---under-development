@@ -8,16 +8,29 @@
 extern "C" {
 #endif
 
-// ================= 引脚定义 (基于 ESP32-S3) =================
-#define BLDC_PIN_FG       4   // P2 黄线：FG 测速 (输入)
-#define BLDC_PIN_DIR      5   // P3 白线：方向控制 (输出)
-#define BLDC_PIN_PWM      6   // P5 蓝线：PWM 调速 (MCPWM 输出)
-#define BLDC_PIN_BRAKE    7   // P6 绿线：启停控制 (输出)
+// ================= 电机 1 引脚配置 =================
+#define M1_PIN_FG       14   // 测速
+#define M1_PIN_DIR      13   // 方向
+#define M1_PIN_PWM      12   // PWM
+#define M1_PIN_BRAKE    11   // 刹车
+
+// ================= 电机 2 引脚配置 =================
+#define M2_PIN_FG       19   // 测速 (注意: S3默认USB_D-)
+#define M2_PIN_DIR      20   // 方向 (注意: S3默认USB_D+)
+#define M2_PIN_PWM      21   // PWM
+#define M2_PIN_BRAKE    47   // 刹车
 
 // ================= 电机参数配置 =================
-#define BLDC_PWM_FREQ_HZ      25000 // PWM 频率 25kHz (推荐 20k~30k)
+#define BLDC_PWM_FREQ_HZ      25000 // PWM 频率 25kHz
 #define BLDC_PULSES_PER_ROUND 6     // 每圈 FG 脉冲数
-#define BLDC_CTRL_PERIOD_MS   50    // PID 控制周期 50ms
+#define BLDC_CTRL_PERIOD_MS   200    // PID 控制周期 50ms
+
+// 电机 ID 枚举
+typedef enum {
+    MOTOR_1 = 0,
+    MOTOR_2 = 1,
+    MOTOR_MAX
+} bldc_motor_id_t;
 
 // 方向枚举
 typedef enum {
@@ -26,26 +39,31 @@ typedef enum {
 } bldc_dir_t;
 
 /**
- * @brief 初始化无刷电机硬件 (MCPWM, PCNT, GPIO) 及 PID 任务
+ * @brief 初始化所有无刷电机硬件及 PID 任务
  */
-void bldc_motor_init(void);
+void bldc_motors_init(void);
 
 /**
- * @brief 设置目标转速 (RPM)
- * @param rpm 目标转速，设为 0 时电机停止
+ * @brief 设置指定电机的目标转速 (RPM)
+ * @param motor_id MOTOR_1 或 MOTOR_2
+ * @param rpm 目标转速
  */
-void bldc_motor_set_target_rpm(float rpm);
+void bldc_motor_set_target_rpm(bldc_motor_id_t motor_id, float rpm);
 
 /**
- * @brief 设置电机方向 (必须在电机停止时调用，内部包含安全保护)
- * @param dir BLDC_DIR_CW 或 BLDC_DIR_CCW
+ * @brief 设置指定电机方向 (必须在停机时调用)
  */
-void bldc_motor_set_direction(bldc_dir_t dir);
+void bldc_motor_set_direction(bldc_motor_id_t motor_id, bldc_dir_t dir);
 
 /**
- * @brief 紧急停止 (拉低 BRAKE 引脚，输出 100% 高电平 PWM)
+ * @brief 指定电机紧急停止
  */
-void bldc_motor_estop(void);
+void bldc_motor_estop(bldc_motor_id_t motor_id);
+
+/**
+ * @brief 所有电机紧急停止
+ */
+void bldc_motor_estop_all(void);
 
 #ifdef __cplusplus
 }

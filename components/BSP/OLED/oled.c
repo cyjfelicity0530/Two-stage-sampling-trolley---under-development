@@ -5,6 +5,8 @@
 #include "freertos/task.h"
 #include <string.h>
 #include "esp_log.h"
+#include "gamepad.h"
+#include "system_state.h"
 
 static const char *TAG = "oled";
 static uint8_t s_oled_buffer[OLED_WIDTH * (OLED_HEIGHT / 8)];
@@ -218,4 +220,33 @@ void oled_draw_string(uint8_t x, uint8_t y, const char *str) {
         x += 8;
         str++;
     }
+}
+
+void monitor_button_states(void *pvParameters) 
+{
+    while (1) {
+        oled_clear();
+
+        // 直接通过 g_state 访问数据
+        if (g_state.btn_b == 1) oled_draw_string(0, 0, "B = 1");
+        else                    oled_draw_string(0, 0, "B = 0");
+
+        if (g_state.btn_a == 1) oled_draw_string(0, 10, "A = 1");
+        else                    oled_draw_string(0, 10, "A = 0");
+
+        if (g_state.d_y == 1)       oled_draw_string(0, 20, "Y = 1");
+        else if (g_state.d_y == -1) oled_draw_string(0, 20, "Y = -1");
+        else                        oled_draw_string(0, 20, "Y = 0");
+
+        if (g_state.d_x == 1)       oled_draw_string(0, 30, "X = 1");
+        else if (g_state.d_x == -1) oled_draw_string(0, 30, "X = -1");
+        else                        oled_draw_string(0, 30, "X = 0");
+
+        oled_update();
+        vTaskDelay(pdMS_TO_TICKS(100)); 
+    }
+}
+
+void start_monitor_task(void) {
+    xTaskCreate(monitor_button_states, "monitor", 2048, NULL, 4, NULL);
 }
